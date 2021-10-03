@@ -38,14 +38,11 @@ func (s *Session) writeRaw(message *envelope) error {
 		return errors.New("tried to write to a closed session")
 	}
 
-	s.conn.SetWriteDeadline(time.Now().Add(s.melody.Config.WriteWait))
-	err := s.conn.WriteMessage(message.t, message.msg)
-
-	if err != nil {
+	if err := s.conn.SetWriteDeadline(time.Now().Add(s.melody.Config.WriteWait)); err != nil {
 		return err
 	}
 
-	return nil
+	return s.conn.WriteMessage(message.t, message.msg)
 }
 
 func (s *Session) closed() bool {
@@ -66,7 +63,9 @@ func (s *Session) close() {
 }
 
 func (s *Session) ping() {
-	s.writeRaw(&envelope{t: websocket.PingMessage, msg: []byte{}})
+	if err := s.writeRaw(&envelope{t: websocket.PingMessage, msg: []byte{}}); err != nil {
+		s.melody.errorHandler(s, err)
+	}
 }
 
 func (s *Session) writePump() {
@@ -107,12 +106,14 @@ loop:
 
 func (s *Session) readPump() {
 	s.conn.SetReadLimit(s.melody.Config.MaxMessageSize)
-	s.conn.SetReadDeadline(time.Now().Add(s.melody.Config.PongWait))
+	if err := s.conn.SetReadDeadline(time.Now().Add(s.melody.Config.PongWait)); err != nil {
+		s.melody.errorHandler(s, err)
+	}
 
 	s.conn.SetPongHandler(func(string) error {
-		s.conn.SetReadDeadline(time.Now().Add(s.melody.Config.PongWait))
+		var err = s.conn.SetReadDeadline(time.Now().Add(s.melody.Config.PongWait))
 		s.melody.pongHandler(s)
-		return nil
+		return err
 	})
 
 	if s.melody.closeHandler != nil {
